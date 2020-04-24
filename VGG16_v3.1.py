@@ -8,6 +8,8 @@ from keras.layers import Input
 from keras.models import Model
 from keras.optimizers import Adam
 from keras.utils import to_categorical
+from keras.callbacks import ModelCheckpoint, LearningRateScheduler
+from keras.callbacks import ReduceLROnPlateau
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report
 from sklearn.metrics import confusion_matrix
@@ -45,34 +47,48 @@ print('Number of Observations: ', len(my_glob))
 full_img_paths = {os.path.basename(x): x for x in my_glob}
 df_NIH['path'] = df_NIH['Image Index'].map(full_img_paths.get)
 
-# create new columns for each illness
-# total 14 thoracic disease： pathology_list = ['Cardiomegaly','Emphysema','Effusion','Nodule','Pneumothorax','Atelectasis','Pleural_Thickening','Mass','Edema','Consolidation','Infiltration','Fibrosis','Pneumonia', 'No Finding'] #'Hernia',
-# We only keep eight disease
-# pathology_list = ['Cardiomegaly', 'Effusion', 'Nodule', 'Pneumothorax', 'Atelectasis', 'Mass', 'Infiltration', 'Pneumonia', 'No Finding']
 
+# extract four common illness from NIH datasets
 df_NIH_effusion = df_NIH[df_NIH['Finding Labels'].isin(['Effusion'])]
 df_NIH_atelectasis = df_NIH[df_NIH['Finding Labels'].isin(['Atelectasis'])]
 df_NIH_infiltration = df_NIH[df_NIH['Finding Labels'].isin(['Infiltration'])]
 df_NIH_pneumonia = df_NIH[df_NIH['Finding Labels'].isin(['Pneumonia'])]
 df_NIH_none = df_NIH[df_NIH['Finding Labels'].isin(['No Finding'])]
+
+
+# only keep 20000 health images
+df_NIH_none = df_NIH_none.sample(n=40000)
+
+# add 3800 pneumonia images from other datasets
+glob2 = glob('C:/Users/Zijian/Cranfield University/Muhammad Hasan Ali, Hasan - GroupProject/Research/PNEUMONIA/*.jpeg')
+df_Phe = pd.DataFrame(glob2, columns=['path'])
+df_Phe['Finding Labels'] = 'Pneumonia'
+
+# concat the NIH pneumonia and other pneumonia images together
+df_NIH_pneumonia = pd.concat([df_NIH_pneumonia, df_Phe])
+
 print('effusion :', len(df_NIH_effusion))
 print('atelectasis :', len(df_NIH_atelectasis))
 print('infiltration :', len(df_NIH_infiltration))
 print('pneumonia :', len(df_NIH_pneumonia))
 print('health :', len(df_NIH_none))
 
-df_NIH_none = df_NIH_none.sample(n=10000)
+
 
 # concat the five dataframe together
 xray_data = pd.concat([df_NIH_effusion, df_NIH_atelectasis, 
 	df_NIH_infiltration, df_NIH_pneumonia, df_NIH_none])
 
-# split data
-train_set, test_set = train_test_split(xray_data, test_size = 0.2, random_state = 42)
+# split data into train, test, validation
+train_set, valid_set = train_test_split(xray_data, test_size = 0.02, random_state = 42)
+
+train_set, test_set = train_test_split(train_set, test_size = 0.2, random_state = 8545)
+
 
 # quick check to see that the training and test set were split properly
 print('training set: ', len(train_set))
 print('test set: ', len(test_set))
+print('validation set: ', len(valid_set))
 print('full data set: ', len(xray_data))
 
 # Create ImageDataGenerator, to perform significant image augmentation
@@ -101,7 +117,7 @@ train_generator = train_datagen.flow_from_dataframe(
 	class_mode='categorical'
 )
 
-validation_generator = test_datagen.flow_from_dataframe(
+validation_generator = train_datagen.flow_from_dataframe(
 	dataframe=test_set,
 	directory=None,
 	x_col='path', 
@@ -113,15 +129,14 @@ validation_generator = test_datagen.flow_from_dataframe(
 )
 
 
-
 test_X, test_Y = next(test_datagen.flow_from_dataframe(
-	dataframe=test_set,
+	dataframe=valid_set,
 	directory=None,
 	x_col='path', 
 	y_col = 'Finding Labels',
 	target_size=image_size,
 	color_mode='rgb',
-	batch_size= 5000,
+	batch_size= 1200,
 	class_mode='categorical'
 	))
 
@@ -149,11 +164,36 @@ for layer in baseModel.layers:
 	layer.trainable = False
 
 
-model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+model.compile(optimizer=Adam(learning_rate=0.5e-3), 
+	loss='categorical_crossentropy', 
+	metrics=['accuracy'])
 model.summary()
 
+# Prepare model model saving directory.
+save_dir = os.path.join(os.getcwd(), 'saved_models')
+if not os.path.isdir(save_dir):
+    os.makedirs(save_dir)
+filepath = os.path.join(save_dir, 'VGG16_train')
+
+
+# Prepare callbacks for model saving and for learning rate adjustment.
+checkpoint = ModelCheckpoint(filepath=filepath,
+                             monitor='val_acc',
+                             verbose=1,
+                             save_best_only=True)
+
+
+lr_reducer = ReduceLROnPlateau(factor=np.sqrt(0.1),
+                               cooldown=0,
+                               patience=5,
+                               min_lr=0.5e-6)
+
+callbacks = [checkpoint, lr_reducer]
+
+
+
 print("[INFO] training head...")
-EPOCHS = 20
+EPOCHS = 30
 H = model.fit_generator(
         train_generator,
         steps_per_epoch=20,
@@ -168,25 +208,19 @@ predIdxs = model.predict(test_X)
 
 # for each image in the testing set we need to find the index of the
 # label with corresponding largest predicted probability
-predIdxs = np.argmax(predIdxs, axis=1)
+predIdxs2 = np.argmax(predIdxs, axis=1)
 
-print(classification_report(test_Y.argmax(axis=1), predIdxs))
+print(classification_report(test_Y.argmax(axis=1), predIdxs2))
+print(train_generator.class_indices)
+
+scores = model.evaluate(test_X, test_Y, verbose=1)
+print('Validation loss:', scores[0])
+print('Validation accuracy:', scores[1])
 
 
-# compute the confusion matrix and and use it to derive the raw
-# accuracy, sensitivity, and specificity
+#@todo plot roc
+from sklearn.metrics import roc_curve, auc
 
-cm = confusion_matrix(test_Y.argmax(axis=1), predIdxs)
-total = sum(sum(cm))
-acc = (cm[0, 0] + cm[1, 1]) / total
-sensitivity = cm[0, 0] / (cm[0, 0] + cm[0, 1])
-specificity = cm[1, 1] / (cm[1, 0] + cm[1, 1])
-# show the confusion matrix, accuracy, sensitivity, and specificity
-
-print(cm)
-print("acc: {:.6f}".format(acc))
-print("sensitivity: {:.6f}".format(sensitivity))
-print("specificity: {:.6f}".format(specificity))
 
 
 # plot the training loss and accuracy

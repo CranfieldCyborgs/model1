@@ -21,7 +21,9 @@ The next step is to solve this problem and adjust the model to achieve a better 
 
 ## HUGE step (VGG16_v3.2.py)
 The data construction:
+
 ![avatar](/fig/data_distribution.png)
 
 The final performance:
+
 ![avatar](/fig/auc_vgg16.png)

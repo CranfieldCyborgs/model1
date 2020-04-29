@@ -1,6 +1,6 @@
 from keras.preprocessing.image import ImageDataGenerator
-from keras.applications import VGG16
-from keras.layers import AveragePooling2D
+from keras.applications import InceptionV3
+from keras.layers import AveragePooling2D, GlobalAveragePooling2D
 from keras.layers import Dropout
 from keras.layers import Flatten
 from keras.layers import Dense
@@ -80,23 +80,6 @@ df_COVID19['Finding Labels'] = 'Pneumonia' # be careful about the label here
 # concat the NIH pneumonia, kaggle pneumonia and COVID-19 images together
 # here is the final data set
 xray_data = pd.concat([df_NIH, df_extraPhe, df_COVID19])
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -186,18 +169,20 @@ valid_X, valid_Y = next(test_datagen.flow_from_dataframe(
 
 ## model part
 
+
 # load the VGG16 network, ensuring the head FC layer sets are left off
-baseModel = VGG16(weights="imagenet", include_top=False,
+baseModel = InceptionV3(weights="imagenet", include_top=False,
 	input_tensor=Input(shape=(128, 128, 3)))
 
 # construct the head of the model that will be placed on top of the
 # the base model
 headModel = baseModel.output
-headModel = AveragePooling2D(pool_size=(4, 4))(headModel)
-headModel = Flatten(name="flatten")(headModel)
-headModel = Dense(64, activation="relu")(headModel)
+headModel = GlobalAveragePooling2D()(headModel)
+headModel = Dense(512, activation="relu")(headModel)
 headModel = Dropout(0.5)(headModel)
-headModel = Dense(5, activation="softmax")(headModel) #How many classes?
+headModel = Dense(512, activation="relu")(headModel)
+headModel = Dropout(0.5)(headModel)
+headModel = Dense(3, activation="softmax")(headModel) #How many classes?
 
 # place the head FC model on top of the base model (this will become
 # the actual model we will train)

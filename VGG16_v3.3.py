@@ -166,6 +166,8 @@ model.compile(optimizer=Adam(learning_rate=0.5e-3),
 	metrics=['accuracy'])
 model.summary()
 
+#copy a model for recall
+model2 = model 
 # Saving parameters of each epoch
 checkpoint_path = "saved_models/cp-{epoch:04d}.ckpt"
 checkpoint_dir = os.path.dirname(checkpoint_path)
@@ -208,12 +210,13 @@ plt.savefig('performance2.png', ppi=300)
 #@todo according to the performance curves choose the best parameters
 #! ls checkpoint_dir
 # latest = tf.train.latest_checkpoint(checkpoint_dir)
-new = model.load_weights('saved_models/cp-0001.ckpt')
+model2.load_weights('saved_models/cp-0001.ckpt')
 
 # Using validation datasets to predict
 print("[INFO] evaluating network...")
-# predval = model.predict(valid_X)
-predval = new.predict(valid_X)
+predval = model.predict(valid_X)
+# for reccall
+predval = model2.predict(valid_X)
 
 
 # for each image in the testing set we need to find the index of the
@@ -228,6 +231,7 @@ print(classification_report(valid_Y.argmax(axis=1), predval2, target_names=name)
 
 
 scores = model.evaluate(valid_X, valid_Y, verbose=1)
+scores = model2.evaluate(valid_X, valid_Y, verbose=1)
 print('Validation loss:', scores[0])
 print('Validation accuracy:', scores[1])
 
